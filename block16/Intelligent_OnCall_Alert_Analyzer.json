@@ -1,0 +1,367 @@
+{
+  "name": "Интеллектуальный дежурный — Alert Analyzer",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000001",
+      "name": "Telegram Trigger",
+      "webhookId": "d1a0e1f0-2001-4a00-b000-000000000001",
+      "credentials": {
+        "telegramApi": {
+          "id": "yEZ29UQTCT7zSQyt",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Проанализируй следующее сообщение и определи, является ли оно техническим алертом:\n\n{{ $json.message.text }}",
+        "options": {
+          "systemMessage": "### РОЛЬ\nТы — интеллектуальный фильтр входящих сообщений для системы мониторинга инфраструктуры.\n\n### ЗАДАЧА\nОпредели, является ли входящее сообщение техническим алертом (уведомлением о проблеме с IT-инфраструктурой) или нет.\n\nПримеры технических алертов:\n- \"High load average on web-server-01\"\n- \"Disk usage above 90% on db-master\"\n- \"Service nginx is down on prod-01\"\n- \"Memory usage critical: 95% used on app-server-03\"\n- \"Connection timeout to database cluster\"\n- \"[CRITICAL] CPU usage > 95% on node-5\"\n- Тексты из систем мониторинга (Zabbix, Prometheus, Grafana, Nagios, Datadog и т.д.)\n- \"OOM Killer invoked on worker-02\"\n- \"SSL certificate expires in 3 days for api.example.com\"\n\nПримеры НЕ-алертов:\n- \"Привет!\"\n- \"Когда следующий релиз?\"\n- \"Можешь рассказать анекдот?\"\n- Спам, реклама, бытовые вопросы, приветствия\n\n### ФОРМАТ ОТВЕТА\nОтветь строго JSON-объектом, без лишнего текста до или после:\n{\"is_alert\": true, \"reason\": \"краткое описание почему это алерт\"}\nили\n{\"is_alert\": false, \"reason\": \"краткое описание почему это НЕ алерт\"}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        400,
+        300
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000002",
+      "name": "AI Agent - Guard"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "google/gemini-2.5-flash"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        400,
+        520
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000003",
+      "name": "OpenAI Chat Model Guard",
+      "credentials": {
+        "openAiApi": {
+          "id": "fkTagKGIHzBi1TPH",
+          "name": "OpenAi account Openrouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const output = $input.first().json.output;\nlet parsed;\ntry {\n  const jsonMatch = output.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    parsed = JSON.parse(jsonMatch[0]);\n  } else {\n    parsed = { is_alert: false, reason: 'Не удалось распознать ответ фильтра' };\n  }\n} catch (e) {\n  parsed = { is_alert: false, reason: 'Ошибка парсинга ответа фильтра: ' + e.message };\n}\nreturn [{ json: parsed }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        750,
+        300
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000004",
+      "name": "Parse Guard Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-is-alert",
+              "leftValue": "={{ $json.is_alert }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1050,
+        300
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000005",
+      "name": "Is Technical Alert?"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Проанализируй следующий технический алерт:\n\n{{ $('Telegram Trigger').item.json.message.text }}",
+        "options": {
+          "systemMessage": "### РОЛЬ\nТы — Интеллектуальный дежурный инженер (AI On-Call Engineer). Ты анализируешь технические алерты и формируешь структурированные отчёты для DevOps/SRE-инженеров.\n\n### ЗАДАЧА\nПроанализируй технический алерт и сформируй подробный отчёт с планом диагностики.\n\n### ФОРМАТ ОТВЕТА (строго Telegram Markdown):\n\n*Тип проблемы:* <категория: High Load / Disk Space / Memory Leak / Service Down / Network Issue / Database / Security / SSL Certificate / Other>\n\n*Уровень критичности:* <Critical / High / Medium / Low>\n\n*Рекомендация по исправлению:*\n1. <конкретная команда или действие>\n2. <следующий шаг>\n3. <дополнительные действия>\n\n*Возможные причины сбоя:*\n- <причина 1>\n- <причина 2>\n- <причина 3>\n\n### ПРАВИЛА\n- Давай конкретные Linux-команды для диагностики (top, htop, uptime, df -h, free -m, journalctl, netstat, ss, lsof, dmesg и т.д.)\n- Указывай возможные корневые причины проблемы\n- Рекомендации должны быть практичными и немедленно применимыми инженером\n- Будь кратким, но информативным\n- Отвечай на русском языке\n- Используй ТОЛЬКО Telegram Markdown: *жирный*, _курсив_, `код`\n- НЕ используй двойные звёздочки (**), решётки (#), или MarkdownV2 синтаксис\n- Избегай спецсимволов Telegram в обычном тексте: _ * [ ] ( ) ~ > + - = | { } . !"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1400,
+        200
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000006",
+      "name": "AI Agent - Worker",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemini-2.5-flash",
+          "mode": "list",
+          "cachedResultName": "google/gemini-2.5-flash"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1400,
+        420
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000007",
+      "name": "OpenAI Chat Model Worker",
+      "credentials": {
+        "openAiApi": {
+          "id": "fkTagKGIHzBi1TPH",
+          "name": "OpenAi account Openrouter"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1750,
+        100
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000008",
+      "name": "Send Report",
+      "webhookId": "d1a0e1f0-3001-4a00-b000-000000000001",
+      "credentials": {
+        "telegramApi": {
+          "id": "yEZ29UQTCT7zSQyt",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=Ошибка анализа: AI недоступен\n\nСырой текст алерта:\n{{ $('Telegram Trigger').item.json.message.text }}\n\nПожалуйста, проанализируйте алерт вручную.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1750,
+        400
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000009",
+      "name": "Send Error Alert",
+      "webhookId": "d1a0e1f0-3001-4a00-b000-000000000002",
+      "credentials": {
+        "telegramApi": {
+          "id": "yEZ29UQTCT7zSQyt",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1400,
+        550
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000010",
+      "name": "Stop - Not Alert"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        700
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000011",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=Ошибка анализа: AI недоступен\n\nОшибка в воркфлоу: {{ $json.execution.error.message }}\nПоследний узел: {{ $json.execution.lastNodeExecuted }}\n\nПожалуйста, проверьте логи n8n.",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        700
+      ],
+      "id": "d1a0e1f0-1001-4a00-b000-000000000012",
+      "name": "Send Workflow Error",
+      "webhookId": "d1a0e1f0-3001-4a00-b000-000000000003",
+      "credentials": {
+        "telegramApi": {
+          "id": "yEZ29UQTCT7zSQyt",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Guard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model Guard": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Guard",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Guard": {
+      "main": [
+        [
+          {
+            "node": "Parse Guard Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Guard Response": {
+      "main": [
+        [
+          {
+            "node": "Is Technical Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Technical Alert?": {
+      "main": [
+        [
+          {
+            "node": "AI Agent - Worker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop - Not Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model Worker": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent - Worker",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent - Worker": {
+      "main": [
+        [
+          {
+            "node": "Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Send Workflow Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f964065ac9ea69072d01b5e91d627f6f04ed8f12c8354d0bb221932e3f210f1e"
+  },
+  "tags": []
+}

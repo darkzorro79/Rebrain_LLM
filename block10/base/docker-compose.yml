@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: pgvector-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: myvectordb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data

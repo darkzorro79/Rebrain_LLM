@@ -1,0 +1,111 @@
+import os
+import json
+import urllib.request
+from openai import OpenAI
+
+# Инициализация клиента
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY", "not-needed"),
+    base_url=os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
+)
+
+# URL для скачивания лога
+LOG_URL = "ftp://kropalik.ru/logs.txt"
+
+
+def download_log(url: str) -> str:
+    """Скачивает файл по URL и возвращает его содержимое."""
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.read().decode('utf-8')
+    except Exception as e:
+        print(f"[ERROR] Не удалось скачать лог: {e}")
+        exit(1)
+
+
+def parse_logs_with_llm(log_content: str) -> dict:
+    """Отправляет логи в LLM для парсинга и возвращает структурированный результат."""
+    
+    system_instruction = """
+Role: Ты — Log Parser для анализа системных логов.
+Task: Проанализируй входные логи и извлеки записи об ошибках/событиях.
+Output Format: ВСЕГДА отвечай валидным JSON объектом с ключом "entries".
+"""
+
+    few_shot_input = """
+Лог:
+2024-01-15 10:23:45 ERROR [auth-service] Connection refused
+2024-01-15 10:24:01 WARN [api-gateway] High latency detected
+SYSTEM DOWN
+"""
+
+    few_shot_output = json.dumps({
+        "entries": [
+            {
+                "service_name": "auth-service",
+                "error_code": 0,
+                "severity": "CRITICAL",
+                "message": "Connection refused"
+            },
+            {
+                "service_name": "api-gateway",
+                "error_code": 0,
+                "severity": "WARNING",
+                "message": "High latency detected"
+            },
+            {
+                "service_name": "system",
+                "error_code": 0,
+                "severity": "CRITICAL",
+                "message": "SYSTEM DOWN"
+            }
+        ]
+    }, ensure_ascii=False)
+
+    raw_content = None
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL", "gpt-oss:120b-cloud"),
+            messages=[
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": few_shot_input},
+                {"role": "assistant", "content": few_shot_output},
+                {"role": "user", "content": log_content}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+
+        raw_content = response.choices[0].message.content
+        if raw_content is None:
+            print("[ERROR] Модель не вернула содержимое ответа")
+            exit(1)
+
+        return json.loads(raw_content)
+
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Ошибка парсинга JSON: {e}")
+        if raw_content:
+            print(f"[DEBUG] Полученный ответ: {raw_content}")
+        exit(1)
+    except Exception as e:
+        print(f"[ERROR] Произошла ошибка: {e}")
+        exit(1)
+
+
+def main():
+    # Скачиваем лог
+    print("[INFO] Скачиваю лог...")
+    log_content = download_log(LOG_URL)
+
+    # Парсим лог через LLM
+    print("[INFO] Парсинг лога через LLM...")
+    result = parse_logs_with_llm(log_content)
+
+    # Выводим результат
+    print("\n[OK] Результат парсинга:")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
